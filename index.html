@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡️ 极速本地 PDF 分割器</title>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; background: #f4f4f5; color: #333; }
+        .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #f6821f; margin-bottom: 5px; }
+        p.sub { text-align: center; color: #666; font-size: 0.9em; margin-bottom: 30px; }
+        .box { border: 2px dashed #ddd; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 20px; cursor: pointer; transition: background-color 0.3s, border-color 0.3s; }
+        .box:hover { border-color: #f6821f; background: #fffaf5; }
+        input[type="text"], input[type="number"], button { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box; }
+        button { background: #f6821f; color: white; border: none; font-weight: bold; cursor: pointer; margin-top: 20px; transition: background-color 0.3s; }
+        button:hover { background: #e67615; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #status { margin-top: 20px; text-align: center; font-size: 1em; color: #333; font-weight: 500; }
+        .hidden { display: none; }
+        .options-group { margin-top: 20px; }
+        .split-mode-selector { display: flex; justify-content: center; gap: 20px; margin-bottom: 20px; }
+        .split-mode-selector label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>✂️ 浏览器本地分割 PDF</h1>
+    <p class="sub">文件不上传服务器，保护隐私</p>
+
+    <div class="box" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <span id="fileName">点击或拖拽 PDF 文件到此处</span>
+        <input type="file" id="fileInput" accept="application/pdf" class="hidden" onchange="handleFileSelect(this.files)">
+    </div>
+
+    <div id="processingOptions" class="hidden">
+        <div class="split-mode-selector">
+            <label><input type="radio" name="splitMode" value="range" checked onchange="toggleOptions()"> 按页码范围</label>
+            <label><input type="radio" name="splitMode" value="size" onchange="toggleOptions()"> 按文件大小</label>
+            <label><input type="radio" name="splitMode" value="count" onchange="toggleOptions()"> 按固定页数</label>
+        </div>
+
+        <div id="rangeOptions" class="options-group">
+            <label for="pageRange"><strong>提取指定页面 (如: 1-5, 8)</strong></label>
+            <input type="text" id="pageRange" placeholder="输入页码，用逗号隔开，- 代表范围">
+        </div>
+
+        <div id="sizeOptions" class="options-group hidden">
+            <label for="chunkSize"><strong>每个文件最大 (MB)</strong></label>
+            <input type="number" id="chunkSize" value="50" placeholder="例如: 50">
+        </div>
+
+        <div id="countOptions" class="options-group hidden">
+            <label for="pageCount"><strong>每个文件包含页数</strong></label>
+            <input type="number" id="pageCount" value="20" placeholder="例如: 20">
+        </div>
+        
+        <button id="processBtn" onclick="processPDF()">开始分割</button>
+    </div>
+
+    <div id="status"></div>
+</div>
+
+<script>
+    let currentFileBytes = null;
+    let totalPages = 0;
+    let originalFileName = '';
+
+    const dropZone = document.getElementById('dropZone');
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.style.borderColor = '#f6821f';
+        dropZone.style.backgroundColor = '#fffaf5';
+    });
+    dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.style.borderColor = '#ddd';
+        dropZone.style.backgroundColor = 'transparent';
+    });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.style.borderColor = '#ddd';
+        dropZone.style.backgroundColor = 'transparent';
+        handleFileSelect(e.dataTransfer.files);
+    });
+
+    async function handleFileSelect(files) {
+        const { PDFDocument } = PDFLib;
+        const file = files[0];
+        if (!file || file.type !== 'application/pdf') {
+            alert('请选择一个 PDF 文件！');
+            return;
+        }
+
+        originalFileName = file.name.replace(/\.pdf$/i, '');
+        document.getElementById('fileName').textContent = `✅ 已选中: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+        document.getElementById('status').textContent = "正在加载和解析 PDF，请稍候...";
+        
+        try {
+            currentFileBytes = await file.arrayBuffer();
+            const pdfDoc = await PDFDocument.load(currentFileBytes, { ignoreEncryption: true });
+            
+            try {
+                totalPages = pdfDoc.getPageCount();
+            } catch (pageError) {
+                throw new Error("无法解析PDF页面。文件可能已损坏或格式不兼容。");
+            }
+            
+            document.getElementById('status').textContent = `✅ 文件加载完毕，共 ${totalPages} 页。请选择分割方式。`;
+            document.getElementById('processingOptions').classList.remove('hidden');
+        } catch (e) {
+            document.getElementById('status').textContent = `❌ 文件加载失败: ${e.message}`;
+            console.error(e);
+        }
+    }
+
+    function toggleOptions() {
+        const mode = document.querySelector('input[name="splitMode"]:checked').value;
+        document.getElementById('rangeOptions').classList.toggle('hidden', mode !== 'range');
+        document.getElementById('sizeOptions').classList.toggle('hidden', mode !== 'size');
+        document.getElementById('countOptions').classList.toggle('hidden', mode !== 'count');
+    }
+
+    function processPDF() {
+        const mode = document.querySelector('input[name="splitMode"]:checked').value;
+        if (mode === 'range') {
+            splitPdfByPageRange();
+        } else if (mode === 'size') {
+            splitPdfByFileSize();
+        } else {
+            splitPdfByPageCount();
+        }
+    }
+
+    async function splitPdfByPageRange() {
+        if (!currentFileBytes) return;
+        const { PDFDocument } = PDFLib;
+        const rangeText = document.getElementById('pageRange').value.trim();
+        if (!rangeText) {
+            alert("请输入要提取的页码范围！");
+            return;
+        }
+        
+        setButtonState(true, "正在按页码提取...");
+
+        try {
+            const pagesToKeep = new Set();
+            const parts = rangeText.split(/[,，]/);
+            for (let part of parts) {
+                part = part.trim();
+                if (part.includes('-')) {
+                    let [start, end] = part.split('-').map(Number);
+                    if (start && end) {
+                        for (let i = start; i <= end; i++) pagesToKeep.add(i - 1);
+                    }
+                } else {
+                    const p = Number(part);
+                    if (p) pagesToKeep.add(p - 1);
+                }
+            }
+
+            const indices = Array.from(pagesToKeep).filter(i => i >= 0 && i < totalPages).sort((a, b) => a - b);
+            if (indices.length === 0) throw new Error("页码范围无效或超出总页数。");
+
+            const pdfDoc = await PDFDocument.load(currentFileBytes, { ignoreEncryption: true });
+            const newPdf = await PDFDocument.create();
+            
+            const copiedPages = await newPdf.copyPages(pdfDoc, indices);
+            copiedPages.forEach(page => newPdf.addPage(page));
+
+            const pdfBytes = await newPdf.save();
+            const blob = new Blob([pdfBytes], { type: "application/pdf" });
+            saveAs(blob, `${originalFileName}_pages_${rangeText}.pdf`);
+            
+            document.getElementById('status').textContent = "✅ 分割完成，下载已开始！";
+        } catch (err) {
+            document.getElementById('status').textContent = `❌ 处理出错: ${err.message}`;
+            console.error(err);
+        } finally {
+            setButtonState(false, "开始分割");
+        }
+    }
+
+    async function splitPdfByFileSize() {
+        if (!currentFileBytes) return;
+        const { PDFDocument } = PDFLib;
+        const chunkSizeMB = parseFloat(document.getElementById('chunkSize').value);
+        if (isNaN(chunkSizeMB) || chunkSizeMB <= 0) {
+            alert("请输入有效的文件大小！");
+            return;
+        }
+
+        const maxSizeBytes = chunkSizeMB * 1024 * 1024;
+        setButtonState(true, "正在按大小分割...");
+        
+        try {
+            const pdfDoc = await PDFDocument.load(currentFileBytes, { ignoreEncryption: true });
+            let newPdf = await PDFDocument.create();
+            let chunkIndex = 1;
+            let currentChunkSize = 0;
+            let pagesInCurrentChunk = 0;
+            const zip = new JSZip();
+
+            for (let i = 0; i < totalPages; i++) {
+                // Estimate page size correctly
+                const tempPdf = await PDFDocument.create();
+                const [tempCopiedPage] = await tempPdf.copyPages(pdfDoc, [i]);
+                tempPdf.addPage(tempCopiedPage);
+                const pageBytes = await tempPdf.save();
+                const pageSize = pageBytes.byteLength;
+
+                if (pagesInCurrentChunk > 0 && currentChunkSize + pageSize > maxSizeBytes && i > 0) {
+                    // Save current chunk
+                    const pdfBytes = await newPdf.save();
+                    zip.file(`${originalFileName}_part_${chunkIndex}.pdf`, pdfBytes);
+                    document.getElementById('status').textContent = `正在处理... 已生成分块 ${chunkIndex}`;
+                    
+                    // Start new chunk
+                    chunkIndex++;
+                    newPdf = await PDFDocument.create();
+                    currentChunkSize = 0;
+                    pagesInCurrentChunk = 0;
+                }
+                
+                // Add page to the actual chunk
+                const [copiedPage] = await newPdf.copyPages(pdfDoc, [i]);
+                newPdf.addPage(copiedPage);
+                currentChunkSize += pageSize; // Update size
+                pagesInCurrentChunk++;
+            }
+
+            // Save the last chunk
+            if (pagesInCurrentChunk > 0) {
+                const pdfBytes = await newPdf.save();
+                zip.file(`${originalFileName}_part_${chunkIndex}.pdf`, pdfBytes);
+            }
+
+            if (chunkIndex === 1 && pagesInCurrentChunk > 0) { // If only one chunk, download as PDF
+                 const blob = new Blob([await newPdf.save()], { type: "application/pdf" });
+                 saveAs(blob, `${originalFileName}_part_1.pdf`);
+                 document.getElementById('status').textContent = "✅ 文件小于设定大小，无需分割，已直接下载。";
+            } else { // Otherwise, download as ZIP
+                document.getElementById('status').textContent = "正在生成 ZIP 文件...";
+                const zipBlob = await zip.generateAsync({type:"blob"});
+                saveAs(zipBlob, `${originalFileName}_split_by_size.zip`);
+                document.getElementById('status').textContent = `✅ 分割完成！共 ${chunkIndex} 个文件，已打包下载。`;
+            }
+
+        } catch (err) {
+            document.getElementById('status').textContent = `❌ 处理出错: ${err.message}`;
+            console.error(err);
+        } finally {
+            setButtonState(false, "开始分割");
+        }
+    }
+
+    async function splitPdfByPageCount() {
+        if (!currentFileBytes) return;
+        const { PDFDocument } = PDFLib;
+        const pagesPerChunk = parseInt(document.getElementById('pageCount').value, 10);
+        if (isNaN(pagesPerChunk) || pagesPerChunk <= 0) {
+            alert("请输入有效的页数！");
+            return;
+        }
+
+        setButtonState(true, "正在按页数分割...");
+
+        try {
+            const pdfDoc = await PDFDocument.load(currentFileBytes, { ignoreEncryption: true });
+            const zip = new JSZip();
+            let chunkIndex = 1;
+
+            if (totalPages <= pagesPerChunk) {
+                document.getElementById('status').textContent = "✅ 文件总页数小于等于设定页数，无需分割。";
+                setButtonState(false, "开始分割");
+                return;
+            }
+
+            for (let i = 0; i < totalPages; i += pagesPerChunk) {
+                const startPage = i;
+                const endPage = Math.min(i + pagesPerChunk, totalPages);
+                
+                document.getElementById('status').textContent = `正在处理 ${startPage + 1}-${endPage} 页...`;
+
+                const newPdf = await PDFDocument.create();
+                const indices = Array.from({length: endPage - startPage}, (_, k) => startPage + k);
+                const copiedPages = await newPdf.copyPages(pdfDoc, indices);
+                copiedPages.forEach(page => newPdf.addPage(page));
+
+                const pdfBytes = await newPdf.save();
+                zip.file(`${originalFileName}_pages_${startPage + 1}-${endPage}.pdf`, pdfBytes);
+                chunkIndex++;
+            }
+
+            document.getElementById('status').textContent = "正在生成 ZIP 文件...";
+            const zipBlob = await zip.generateAsync({type:"blob"});
+            saveAs(zipBlob, `${originalFileName}_split_by_pages.zip`);
+            document.getElementById('status').textContent = `✅ 分割完成！共 ${chunkIndex - 1} 个文件，已打包下载。`;
+
+        } catch (err) {
+            document.getElementById('status').textContent = `❌ 处理出错: ${err.message}`;
+            console.error(err);
+        } finally {
+            setButtonState(false, "开始分割");
+        }
+    }
+    
+    function setButtonState(disabled, text) {
+        const btn = document.getElementById('processBtn');
+        btn.disabled = disabled;
+        btn.textContent = text;
+    }
+
+</script>
+
+</body>
+</html>
