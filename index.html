@@ -83,6 +83,7 @@
     </div>
 
     <div id="status"></div>
+    <button id="resetBtn" class="hidden" onclick="resetUI()">分割另一个文件</button>
 </div>
 
 <script>
@@ -91,25 +92,6 @@
     let originalFileName = '';
 
     const dropZone = document.getElementById('dropZone');
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropZone.style.borderColor = '#f6821f';
-        dropZone.style.backgroundColor = '#fffaf5';
-    });
-    dropZone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropZone.style.borderColor = '#ddd';
-        dropZone.style.backgroundColor = 'transparent';
-    });
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropZone.style.borderColor = '#ddd';
-        dropZone.style.backgroundColor = 'transparent';
-        handleFileSelect(e.dataTransfer.files);
-    });
 
     async function handleFileSelect(files) {
         const { PDFDocument } = PDFLib;
@@ -135,9 +117,11 @@
             
             document.getElementById('status').textContent = `✅ 文件加载完毕，共 ${totalPages} 页。请选择分割方式。`;
             document.getElementById('processingOptions').classList.remove('hidden');
+            dropZone.style.display = 'none'; // Hide dropzone after selection
         } catch (e) {
             document.getElementById('status').textContent = `❌ 文件加载失败: ${e.message}`;
             console.error(e);
+            showResetState();
         }
     }
 
@@ -204,7 +188,7 @@
             document.getElementById('status').textContent = `❌ 处理出错: ${err.message}`;
             console.error(err);
         } finally {
-            setButtonState(false, "开始分割");
+            showResetState();
         }
     }
 
@@ -277,7 +261,7 @@
             document.getElementById('status').textContent = `❌ 处理出错: ${err.message}`;
             console.error(err);
         } finally {
-            setButtonState(false, "开始分割");
+            showResetState();
         }
     }
 
@@ -299,7 +283,7 @@
 
             if (totalPages <= pagesPerChunk) {
                 document.getElementById('status').textContent = "✅ 文件总页数小于等于设定页数，无需分割。";
-                setButtonState(false, "开始分割");
+                showResetState();
                 return;
             }
 
@@ -328,7 +312,7 @@
             document.getElementById('status').textContent = `❌ 处理出错: ${err.message}`;
             console.error(err);
         } finally {
-            setButtonState(false, "开始分割");
+            showResetState();
         }
     }
     
